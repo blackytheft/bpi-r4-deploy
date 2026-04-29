@@ -189,13 +189,13 @@ UniFi services will be available at:
 
 ### Step 4 — Install NVMe UniFi variant
 
-Follow Part A Steps 1–2 (SD card + NAND rescue). Then instead of `install-nvme.sh`, run:
+Follow Part A Steps 1–2 (SD card + NAND rescue). Then run:
 
 ```sh
-/root/bpi-r4-install/install-nvme-unifi.sh
+/root/bpi-r4-install/install-nvme.sh
 ```
 
-Select your variant — **8GB wired UniFi** or **8GB PoE wired UniFi**.
+Select variant **9** (8GB wired UniFi) or **10** (8GB PoE wired UniFi) — the script handles everything automatically.
 
 The script downloads and installs OpenWrt with the UniFi stack prerequisites (Docker, cgroups, macvlan/dummy kernel modules). NVMe is partitioned as follows:
 
