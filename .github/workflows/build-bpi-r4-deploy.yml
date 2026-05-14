@@ -121,26 +121,6 @@ jobs:
           tar -czf repo-cache/mtk-openwrt-feeds.tar.gz mtk-clone
           rm -rf mtk-clone
 
-      # ---------------------------------------------------------------
-      # NEU: luci-app-wifi7 Feed registrieren
-      # Läuft VOR dem Builder-Script, damit der Feed beim
-      # feeds update/install des Builders bereits bekannt ist.
-      # ---------------------------------------------------------------
-      - name: Register luci-app-wifi7 feed
-        run: |
-          # Builder entpackt openwrt aus repo-cache – wir patchen feeds.conf.default
-          # direkt im Cache-Archiv, damit der Builder es übernimmt.
-          # Alternativ: wir legen eine Patch-Datei an, die der Builder einliest.
-          # Sicherste Methode: feed-Zeile in eine Datei schreiben, die der
-          # Builder-Script auswertet (siehe Kommentar im Builder-Script).
-          #
-          # Falls dein Builder feeds.conf.default NACH dem Entpacken schreibt,
-          # müssen diese Zeilen IN den Builder. Dann siehe Option B weiter unten.
-          #
-          # Diese Methode funktioniert, wenn der Builder die Repos entpackt und
-          # dann ./scripts/feeds update -a aufruft OHNE feeds.conf.default neu zu schreiben.
-          echo "WIFI7_FEED=src-git wifi7 https://github.com/woziwrt/luci-app-wifi7.git" >> $GITHUB_ENV
-
       - name: Run builder script
         run: |
           chmod +x ${{ env.BUILDER }}
@@ -150,28 +130,31 @@ jobs:
           MTK_COMMIT: ${{ env.MTK_COMMIT }}
 
       # ---------------------------------------------------------------
-      # NEU: luci-app-wifi7 in den bereits vorbereiteten OpenWrt-Tree
-      # einbauen und kompilieren.
+      # NEU: luci-app-wifi7 direkt klonen und einbauen.
+      # Das Repo ist KEIN Standard-Feed (kein Root-Makefile mit Feed-Index),
+      # daher KEIN feeds update/install – stattdessen direktes git clone.
       # Läuft NACH dem Builder-Script (OpenWrt-Tree ist unter openwrt/).
       # ---------------------------------------------------------------
-      - name: Add and build luci-app-wifi7
+      - name: Add luci-app-wifi7 (direct clone)
         run: |
           cd openwrt
 
-          # 1) Feed hinzufügen und abrufen
-          echo "src-git wifi7 https://github.com/woziwrt/luci-app-wifi7.git" >> feeds.conf.default
-          ./scripts/feeds update wifi7
-          ./scripts/feeds install luci-app-wifi7
+          # 1) Repo direkt klonen – feeds-Mechanismus umgehen
+          git clone https://github.com/woziwrt/luci-app-wifi7.git /tmp/luci-app-wifi7
 
-          # 2) In luci-Feed kopieren und verlinken
-          cp -r feeds/wifi7/* feeds/luci/applications/luci-app-wifi7/
+          # 2) Direkt in den luci-Feed-Ordner kopieren
+          mkdir -p feeds/luci/applications/luci-app-wifi7
+          cp -r /tmp/luci-app-wifi7/* feeds/luci/applications/luci-app-wifi7/
+
+          # 3) Symlink im package/feeds anlegen (so wie feeds install es täte)
+          mkdir -p package/feeds/luci
           ln -sf ../../../feeds/luci/applications/luci-app-wifi7 \
                  package/feeds/luci/luci-app-wifi7
 
-          # 3) Als Modul in .config eintragen
+          # 4) Als Modul in .config eintragen
           echo "CONFIG_PACKAGE_luci-app-wifi7=m" >> .config
 
-          # 4) Konfiguration neu berechnen (nur das neue Paket einbeziehen)
+          # 5) Konfiguration neu berechnen
           make defconfig
 
       # ---------------------------------------------------------------
