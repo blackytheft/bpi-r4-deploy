@@ -121,6 +121,26 @@ jobs:
           tar -czf repo-cache/mtk-openwrt-feeds.tar.gz mtk-clone
           rm -rf mtk-clone
 
+      # ---------------------------------------------------------------
+      # NEU: luci-app-wifi7 Feed registrieren
+      # Läuft VOR dem Builder-Script, damit der Feed beim
+      # feeds update/install des Builders bereits bekannt ist.
+      # ---------------------------------------------------------------
+      - name: Register luci-app-wifi7 feed
+        run: |
+          # Builder entpackt openwrt aus repo-cache – wir patchen feeds.conf.default
+          # direkt im Cache-Archiv, damit der Builder es übernimmt.
+          # Alternativ: wir legen eine Patch-Datei an, die der Builder einliest.
+          # Sicherste Methode: feed-Zeile in eine Datei schreiben, die der
+          # Builder-Script auswertet (siehe Kommentar im Builder-Script).
+          #
+          # Falls dein Builder feeds.conf.default NACH dem Entpacken schreibt,
+          # müssen diese Zeilen IN den Builder. Dann siehe Option B weiter unten.
+          #
+          # Diese Methode funktioniert, wenn der Builder die Repos entpackt und
+          # dann ./scripts/feeds update -a aufruft OHNE feeds.conf.default neu zu schreiben.
+          echo "WIFI7_FEED=src-git wifi7 https://github.com/woziwrt/luci-app-wifi7.git" >> $GITHUB_ENV
+
       - name: Run builder script
         run: |
           chmod +x ${{ env.BUILDER }}
@@ -128,6 +148,72 @@ jobs:
         env:
           OPENWRT_COMMIT: ${{ env.OPENWRT_COMMIT }}
           MTK_COMMIT: ${{ env.MTK_COMMIT }}
+
+      # ---------------------------------------------------------------
+      # NEU: luci-app-wifi7 in den bereits vorbereiteten OpenWrt-Tree
+      # einbauen und kompilieren.
+      # Läuft NACH dem Builder-Script (OpenWrt-Tree ist unter openwrt/).
+      # ---------------------------------------------------------------
+      - name: Add and build luci-app-wifi7
+        run: |
+          cd openwrt
+
+          # 1) Feed hinzufügen und abrufen
+          echo "src-git wifi7 https://github.com/woziwrt/luci-app-wifi7.git" >> feeds.conf.default
+          ./scripts/feeds update wifi7
+          ./scripts/feeds install luci-app-wifi7
+
+          # 2) In luci-Feed kopieren und verlinken
+          cp -r feeds/wifi7/* feeds/luci/applications/luci-app-wifi7/
+          ln -sf ../../../feeds/luci/applications/luci-app-wifi7 \
+                 package/feeds/luci/luci-app-wifi7
+
+          # 3) Als Modul in .config eintragen
+          echo "CONFIG_PACKAGE_luci-app-wifi7=m" >> .config
+
+          # 4) Konfiguration neu berechnen (nur das neue Paket einbeziehen)
+          make defconfig
+
+      # ---------------------------------------------------------------
+      # NEU: index.js Cache-Bug Fix
+      # Muss NACH make download laufen (build_dir muss existieren).
+      # Falls der Builder make download bereits gemacht hat, ist
+      # build_dir/target-* hier schon vorhanden.
+      # ---------------------------------------------------------------
+      - name: Fix luci-app-wifi7 cache issue
+        run: |
+          cd openwrt
+
+          BUILD_TARGET=$(ls build_dir/ 2>/dev/null | grep "^target-" | head -n1)
+
+          if [ -z "$BUILD_TARGET" ]; then
+            echo "⚠️  build_dir/target-* nicht gefunden – make download nachholen"
+            make download -j8 2>&1 | tail -5
+            BUILD_TARGET=$(ls build_dir/ 2>/dev/null | grep "^target-" | head -n1)
+          fi
+
+          SRC="feeds/luci/applications/luci-app-wifi7/htdocs/luci-static/resources/view/wifi7/index.js"
+
+          if [ -n "$BUILD_TARGET" ] && [ -f "$SRC" ]; then
+            DST1="build_dir/${BUILD_TARGET}/luci-app-wifi7/root/www/luci-static/resources/view/wifi7/"
+            DST2="build_dir/${BUILD_TARGET}/luci-app-wifi7/ipkg-all/luci-app-wifi7/www/luci-static/resources/view/wifi7/"
+            mkdir -p "$DST1" "$DST2"
+            cp "$SRC" "${DST1}index.js"
+            cp "$SRC" "${DST2}index.js"
+            echo "✅ index.js Fix angewendet: build_dir/${BUILD_TARGET}"
+          else
+            echo "⚠️  BUILD_TARGET='${BUILD_TARGET}' oder SRC nicht gefunden – Fix übersprungen"
+          fi
+
+      # ---------------------------------------------------------------
+      # NEU: luci-app-wifi7 kompilieren
+      # ---------------------------------------------------------------
+      - name: Compile luci-app-wifi7
+        run: |
+          cd openwrt
+          make package/feeds/luci/luci-app-wifi7/compile V=s -j$(nproc)
+          echo "✅ APK-Pfad:"
+          find bin/packages -name "luci-app-wifi7*.apk" -o -name "luci-app-wifi7*.ipk" 2>/dev/null
 
       - name: Prepare release artifacts
         run: |
@@ -197,6 +283,17 @@ jobs:
           for DIR in rel-4gb rel-4gb-poe rel-8gb rel-8gb-poe; do
             cp rescue/bpi-r4-rescue-sdcard.img.gz "$DIR/"
           done
+
+          # NEU: luci-app-wifi7 APK in alle Release-Verzeichnisse kopieren
+          WIFI7_APK=$(find openwrt/bin/packages -name "luci-app-wifi7*.apk" 2>/dev/null | head -n1)
+          if [ -n "$WIFI7_APK" ]; then
+            for DIR in rel-4gb rel-4gb-poe rel-8gb rel-8gb-poe; do
+              cp "$WIFI7_APK" "$DIR/"
+            done
+            echo "✅ luci-app-wifi7 APK in alle Release-Dirs kopiert: $(basename $WIFI7_APK)"
+          else
+            echo "⚠️  luci-app-wifi7 APK nicht gefunden – wird nicht in Releases aufgenommen"
+          fi
 
           # UniFi variants = same firmware as 8gb wired + UniFi scripts
           if [ "$VARIANT" = "wired" ]; then
