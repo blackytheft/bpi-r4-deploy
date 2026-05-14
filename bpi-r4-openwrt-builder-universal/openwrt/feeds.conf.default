@@ -5,3 +5,4 @@ src-git telephony https://git.openwrt.org/feed/telephony.git;openwrt-25.12
 src-git video https://github.com/openwrt/video.git;openwrt-25.12
 src-link --subdir=feed mtk_openwrt_feed /home/ipsec/bpi-r4-openwrt-builder-universal/mtk-openwrt-feeds
 src-git adguardhome https://github.com/rufengsuixing/luci-app-adguardhome.git
+src-git wifi7 https://github.com/woziwrt/luci-app-wifi7.git
